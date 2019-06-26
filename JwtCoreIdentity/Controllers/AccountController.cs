@@ -4,6 +4,8 @@ using System.Linq;
 using System.Threading.Tasks;
 using JwtCoreIdentity.Models;
 using JwtCoreIdentity.Provider;
+using JwtCoreIdentity.ViewModels;
+using Microsoft.AspNetCore.Identity;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Extensions.Configuration;
 
@@ -15,18 +17,21 @@ namespace JwtCoreIdentity.Controllers
     public class AccountController : Controller
     {
         private readonly IConfiguration _config;
-        private TokenProvider _tokenProvider;
+        private readonly TokenProvider _tokenProvider;
+        private readonly UserManager<User> _userManager;
 
-        public AccountController(IConfiguration config)
+        public AccountController(IConfiguration config, UserManager<User> userManager)
         {
             _config = config;
+            this._userManager = userManager;
             _tokenProvider = new TokenProvider(_config);
         }
+
         // GET: api/<controller>
         [HttpGet]
         public IEnumerable<string> Get()
         {
-            return new string[] { "value1", "value2" };
+            return new string[] {"value1", "value2"};
         }
 
         // GET api/<controller>/5
@@ -37,24 +42,60 @@ namespace JwtCoreIdentity.Controllers
         }
 
         // POST api/<controller>
-        [HttpPost]
-        public IActionResult Login([FromBody]User user)
+        [HttpPost("login")]
+        public async Task<IActionResult> Login([FromBody] UserViewModel userViewModel)
         {
-            if (user.UserName=="Shahid" && user.Password == "123")
+            if (ModelState.IsValid)
             {
-                var tokenString = _tokenProvider.GenerateJwt();
-                return Ok(new {token = tokenString});
+                var user = await _userManager.FindByNameAsync(userViewModel.Username);
+                if (user == null)
+                {
+                    return Unauthorized();
+                }
+
+                var userResult = await _userManager.CheckPasswordAsync(user, userViewModel.Password);
+                if (userResult)
+                {
+                    var tokenString = _tokenProvider.GenerateJwt();
+                    return Ok(new {token = tokenString});
+                }
+
+                return NotFound("invalid password");
             }
-            else
-            {
-                return Unauthorized();
-            }
+
+            return BadRequest(ModelState);
         }
 
-        // PUT api/<controller>/5
-        [HttpPut("{id}")]
-        public void Put(int id, [FromBody]string value)
+        // POST api/<controller>
+        [HttpPost("register")]
+        public async Task<IActionResult> Registration([FromBody] UserViewModel userViewModel)
         {
+            if (!ModelState.IsValid)
+            {
+                return BadRequest(ModelState);
+            }
+
+            User user = new User()
+            {
+                UserName = userViewModel.Username,
+                FirstName = userViewModel.FirstName,
+                LastName = userViewModel.LastName
+            };
+
+            var identityResult = await _userManager.CreateAsync(user, userViewModel.Password);
+            if (identityResult.Succeeded)
+            {
+                if (!string.IsNullOrWhiteSpace(userViewModel.Email))
+                {
+                    if ((await _userManager.SetEmailAsync(user, userViewModel.Email)).Succeeded)
+                    {
+                        return Ok(user.Id);
+                    }
+                }
+                return Ok();
+            }
+
+            return BadRequest(String.Join("#", identityResult.Errors.Select(x => x.Description).ToList()));
         }
 
         // DELETE api/<controller>/5
